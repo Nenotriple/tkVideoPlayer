@@ -1,11 +1,14 @@
-### Installation
+# tkVideoPlayer Documentation
+
+## Installation
+
 ```shell
 pip install tkvideoplayer
 ```
 
-### Quickstart
+## Quickstart
 
-```py
+```python
 import tkinter as tk
 from tkVideoPlayer import TkinterVideo
 
@@ -15,52 +18,48 @@ videoplayer = TkinterVideo(master=root, scaled=True)
 videoplayer.load(r"samplevideo.mp4")
 videoplayer.pack(expand=True, fill="both")
 
-videoplayer.play() # play the video
+videoplayer.play()  # play the video
 
 root.mainloop()
 ```
-read additional examples [here](https://github.com/PaulleDemon/tkVideoPlayer/tree/master/examples)
 
-### Methods
-TkVideoPlayer inherits from `tk.Label` and display's the image on the label.
+[See additional examples](https://github.com/Nenotriple/tkVideoPlayer/tree/master/examples)
 
-Below are the methods of this library.
+## Methods
 
-| Methods          | Parameters                           | Description                                                                                                                                                                                   |
-|------------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| \_\_init\_\_     | scaled(bool), consistant_frame_rate(bool)=True, keep_aspect(bool)=False   | The scale parameter scales the video to the label size.  The consistant_frame_rate parameter skips frames to keep the framerate consistant and keep_aspect keeps aspect ratio when resizing(note: It will not increase the size)       |
-| set_scaled       | scaled(bool), keep_aspect(bool)=False                         | scales the video to the label size.                                                                                                                                                           |
-| load             | file_path(str)                       | starts loading the video in a thread.                                                                                                                                                         |
-| set_size         | size(Tuple[int, int]), keep_aspect(bool)=False | sets the size of the video frame. setting this will set scaled to `False`                                                                                                                     |
-| current_duration  | -                                    | return video duration in seconds.                                                                                                                                                             |
-| video_info       | -                                    | returns dictionary containing framerate, framesize, duration.|
-| play             | -                                    | Plays the video.                                                                                                                                                                              |
-| pause            | -                                    | Pauses the video                                                                                                                                                                              |
-| is_paused        | -                                    | returns if the video is currently paused.                                                                                                                                               
-| stop             | -                                    | stops playing the file, closes the file.  |
-| seek             | sec(int)                             | moves to specific time stamp. provide time stamp in seconds                                           
-| keep_aspect             | keep_aspect(bool)                            | keeps aspect ratio when resizing                                          
-| metadata         | -                                    | returns meta information of the video if available in the form of dictionary                                           
-| set_resampling_method|  method(int)                                   | By default the resampling method while resizing is NEAREST, changing this can affect how its resampled when image is resized, refer PIL documentation to read more (note: this can also affect the framerate of the video)|
+TkVideoPlayer inherits from `tk.Label` and displays the image on the label.
 
-### Virtual events
+Below are the available methods:
 
-This are events that can be binded to get your desired results
+| Method                  | Parameters                                                                                              | Description                                                                                                                     |
+|-------------------------|---------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `__init__`              | `scaled` (bool), `consistent_frame_rate` (bool, default `True`), `keep_aspect` (bool, default `False`)  | Resizes video to fit label. Skips frames to maintain framerate. Preserves aspect ratio (won't upscale) if `keep_aspect` is set. |
+| `set_scaled`            | `scaled` (bool), `keep_aspect` (bool, default `False`)                                                  | Scales the video to the label size.                                                                                             |
+| `load`                  | `file_path` (str)                                                                                       | Loads the video in a thread.                                                                                                    |
+| `set_size`              | `size` (Tuple[int, int]), `keep_aspect` (bool, default `False`)                                         | Sets the video frame size. Setting this disables scaling.                                                                       |
+| `current_duration`      | -                                                                                                       | Returns video duration in seconds.                                                                                              |
+| `video_info`            | -                                                                                                       | Returns a dictionary with framerate, framesize, and duration.                                                                   |
+| `play`                  | -                                                                                                       | Plays the video.                                                                                                                |
+| `pause`                 | -                                                                                                       | Pauses the video.                                                                                                               |
+| `is_paused`             | -                                                                                                       | Returns whether the video is currently paused.                                                                                  |
+| `stop`                  | -                                                                                                       | Stops playback and closes the file.                                                                                             |
+| `seek`                  | `sec` (int)                                                                                             | Moves to a specific timestamp (in seconds).                                                                                     |
+| `keep_aspect`           | `keep_aspect` (bool)                                                                                    | Keeps aspect ratio when resizing.                                                                                               |
+| `metadata`              | -                                                                                                       | Returns meta information as a dictionary, if available.                                                                         |
+| `set_resampling_method` | `method` (int)                                                                                          | Sets resizing method. Defaults to NEAREST. See PIL docs for details.                                                            |
 
-| Virtual event          | Description                                                                                                         |
-|------------------------|---------------------------------------------------------------------------------------------------------------------|
-| <<Loaded\>\>       | This event is generated when the video file is opened.                                                           |
-| <<Duration\>\>       | This event is generated when the video duration is found.                                                           |
-| <<SecondChanged\>\>  | This event is generated whenever a second in the video passes (calculated using frame_number%frame_rate==0).        |
-| <<FrameGenerated\>\> | This event is generated whenever there is a new frame available. (internal use, don't use this unless you want to). |
-| <<Ended\>\>          | This event is generated only when the video has ended.                                                              |
+## Virtual Events
 
-<sub> 
+These events can be bound for custom behavior:
 
-note:
+| Virtual Event        | Description                                                                         |
+|----------------------|-------------------------------------------------------------------------------------|
+| `<<Loaded>>`         | Generated when the video file is opened.                                            |
+| `<<Duration>>`       | Generated when the video duration is found.                                         |
+| `<<SecondChanged>>`  | Generated whenever a second passes in the video (`frame_number % frame_rate == 0`). |
+| `<<FrameGenerated>>` | Generated whenever a new frame is available. (Internal use; bind only if needed.)   |
+| `<<Ended>>`          | Generated when the video has ended.                                                 |
 
-If you would like to draw on the video etc. Copy/fork the repo and instead of inheriting from Label inherit from Canvas.
-And use `image_id = self.create_image()` use the image_id to update the image.
-
-</sub>
-
+> **Note:**
+> To draw on the video, fork the repo and inherit from `Canvas` instead of `Label`.
+> Use `image_id = self.create_image()` and update the image using `image_id`.
