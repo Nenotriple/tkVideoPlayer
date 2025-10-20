@@ -203,19 +203,26 @@ class TkinterVideo(tk.Label):
         """Set frame size for display."""
         if not self.winfo_exists():
             return
-        self._video_info["framesize"] = (self._video_container.streams.video[0].width, self._video_container.streams.video[0].height)
-        blank_image = Image.new("RGBA", self._video_info["framesize"], (255, 0, 0, 0))
-        self._current_frame_image = blank_image
-        photo_image = self._create_photoimage(blank_image)
-        if photo_image is not None:
-            self._safe_config_image(photo_image)
-            def safe_configure():
-                if self.winfo_exists():
-                    try:
-                        self.config(width=150, height=100)
-                    except tk.TclError:
-                        pass
-            self.after(0, safe_configure)
+        intrinsic_size = (
+            self._video_container.streams.video[0].width,
+            self._video_container.streams.video[0].height,
+        )
+        self._video_info["framesize"] = intrinsic_size
+        if self._current_display_size == (0, 0):
+            self._current_display_size = intrinsic_size
+        if self._current_frame_image is None:
+            blank_image = Image.new("RGBA", intrinsic_size, (255, 0, 0, 0))
+            self._current_frame_image = blank_image
+            photo_image = self._create_photoimage(blank_image)
+            if photo_image is not None:
+                self._safe_config_image(photo_image)
+                def safe_configure():
+                    if self.winfo_exists():
+                        try:
+                            self.config(width=150, height=100)
+                        except tk.TclError:
+                            pass
+                self.after(0, safe_configure)
 
 
 #endregion
