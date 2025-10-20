@@ -1,43 +1,70 @@
-import gc
-import av
-import time
-import threading
-import logging
-import tkinter as tk
-from PIL import ImageTk, Image, ImageOps
-from typing import Tuple, Dict
+#region Imports
 
-logging.getLogger('libav').setLevel(logging.ERROR)  # removes warning: deprecated pixel format used
+
+# Standard Library
+import gc
+import time
+import logging
+import threading
+
+# Standard Library - GUI
+import tkinter as tk
+
+# Third-Party Libraries
+import av
+from PIL import Image, ImageOps, ImageTk
+
+# Type Hinting
+from typing import Dict, Tuple, Optional, Any
+
+# Suppress libav logging
+logging.getLogger('libav').setLevel(logging.ERROR)
+
+
+#endregion
+#region TkinterVideo
 
 
 class TkinterVideo(tk.Label):
-    def __init__(self, master, scaled: bool = True, consistant_frame_rate: bool = True, keep_aspect: bool = False, *args, **kwargs):
+    """Tkinter label widget for video playback.
+    Supports scaling, aspect ratio, frame rate consistency, and seeking.
+    """
+    def __init__(
+        self,
+        master: Any,
+        scaled: bool = True,
+        consistent_frame_rate: bool = True,
+        keep_aspect: bool = False,
+        *args: Any,
+        **kwargs: Any
+    ) -> None:
         super(TkinterVideo, self).__init__(master, *args, **kwargs)
 
-        self.path = ""
-        self._load_thread = None
+        self.video_path = ""
+        self._video_load_thread = None
 
-        self._paused = True
-        self._stop = True
+        self._is_paused = True
+        self._should_stop = True
 
-        self.consistant_frame_rate = consistant_frame_rate # tries to keep the frame rate consistant by skipping over a few frames
+        # Skip frames to maintain frame rate if decoding is slow
+        self.consistent_frame_rate = consistent_frame_rate
 
-        self._container = None
+        self._video_container = None
 
-        self._current_img = None
-        self._current_frame_Tk = None
-        self._frame_number = 0
-        self._time_stamp = 0
+        self._current_frame_image = None
+        self._current_frame_tk = None
+        self._current_frame_number = 0
+        self._current_timestamp = 0
 
-        self._current_frame_size = (0, 0)
+        self._current_display_size = (0, 0)
 
-        self._seek = False
-        self._seek_sec = 0
+        self._should_seek = False
+        self._seek_seconds = 0
 
         self._video_info = {
-            "duration": 0, # duration of the video
-            "framerate": 0, # frame rate of the video
-            "framesize": (0, 0) # tuple containing frame height and width of the video
+            "duration": 0,
+            "framerate": 0,
+            "framesize": (0, 0)  # (width, height)
         }
 
         self.set_scaled(scaled)
@@ -48,244 +75,337 @@ class TkinterVideo(tk.Label):
         self.bind("<<FrameGenerated>>", self._display_frame)
 
 
-    def keep_aspect(self, keep_aspect: bool):
-        """ keeps the aspect ratio when resizing the image """
-        self._keep_aspect_ratio = keep_aspect
+#endregion
+#region Load/Play/Pause/Stop
 
 
-    def set_resampling_method(self, method: int):
-        """ sets the resampling method when resizing """
-        self._resampling_method = method
+    def load(self, video_file_path: str) -> None:
+        """Load video file from path."""
+        self.stop()
+        self.video_path = video_file_path
 
 
-    def set_size(self, size: Tuple[int, int], keep_aspect: bool=False):
-        """ sets the size of the video """
+    def play(self) -> None:
+        """Start video playback."""
+        self._is_paused = False
+        self._should_stop = False
+        if not self._video_load_thread:
+            self._video_load_thread = threading.Thread(target=self._load, args=(self.video_path,), daemon=True)
+            self._video_load_thread.start()
+
+
+    def pause(self) -> None:
+        """Pause video playback."""
+        self._is_paused = True
+
+
+    def stop(self, *args: Any, **kwargs: Any) -> None:
+        """Stop video playback and cleanup."""
+        self._is_paused = True
+        self._should_stop = True
+        self._cleanup()
+
+
+    def seek(self, seconds: float, precise: bool = False) -> None:
+        """Seek to a specific time.
+        If precise is True and paused, waits briefly for accuracy.
+        """
+        self._should_seek = True
+        self._seek_seconds = seconds
+        if precise and self._is_paused:
+            time.sleep(0.01)
+
+
+#endregion
+#region Info & Metadata
+
+
+    def video_info(self) -> Dict[str, Any]:
+        """Return video info: duration, framerate, framesize."""
+        return self._video_info
+
+
+    def metadata(self) -> Dict[str, Any]:
+        """Return video metadata if available."""
+        if self._video_container:
+            return self._video_container.metadata
+        return {}
+
+
+    def current_frame_number(self) -> int:
+        """Return current frame number."""
+        return self._current_frame_number
+
+
+    def current_duration(self) -> float:
+        """Return current playback time in seconds."""
+        return self._current_timestamp
+
+
+    def current_img(self) -> Optional[Image.Image]:
+        """Return current frame image."""
+        return self._current_frame_image
+
+
+    def is_paused(self) -> bool:
+        """Return True if video is paused."""
+        return self._is_paused
+
+
+#endregion
+#region Aspect Ratio & Resampling
+
+
+    def keep_aspect(self, keep_aspect_ratio: bool) -> None:
+        """Set aspect ratio preservation on resize."""
+        self._keep_aspect_ratio = keep_aspect_ratio
+
+
+    def set_resampling_method(self, resampling_method: int) -> None:
+        """Set image resampling method for resizing."""
+        self._resampling_method = resampling_method
+
+
+    def set_size(self, display_size: Tuple[int, int], keep_aspect_ratio: bool = False) -> None:
+        """Set video display size."""
         self.set_scaled(False, self._keep_aspect_ratio)
-        self._current_frame_size = size
-        self._keep_aspect_ratio = keep_aspect
+        self._current_display_size = display_size
+        self._keep_aspect_ratio = keep_aspect_ratio
 
 
-    def _resize_event(self, event):
-        self._current_frame_size = event.width, event.height
-        if self._paused and self._current_img and self.scaled:
-            if self._keep_aspect_ratio:
-                proxy_img = ImageOps.contain(self._current_img.copy(), self._current_frame_size)
-            else:
-                proxy_img = self._current_img.copy().resize(self._current_frame_size)
-            self._current_imgtk = ImageTk.PhotoImage(proxy_img)
-            self.config(image=self._current_imgtk)
-
-
-    def set_scaled(self, scaled: bool, keep_aspect: bool = False):
+    def set_scaled(self, scaled: bool, keep_aspect_ratio: bool = False) -> None:
+        """Enable or disable scaling and aspect ratio."""
         self.scaled = scaled
-        self._keep_aspect_ratio = keep_aspect
+        self._keep_aspect_ratio = keep_aspect_ratio
         if scaled:
             self.bind("<Configure>", self._resize_event)
         else:
             self.unbind("<Configure>")
-            self._current_frame_size = self.video_info()["framesize"]
+            self._current_display_size = self.video_info()["framesize"]
 
 
-    def _set_frame_size(self, event=None):
-        """ sets frame size to avoid unexpected resizing """
+#endregion
+#region Resize Event
+
+
+    def _resize_event(self, event: tk.Event) -> None:
+        self._current_display_size = event.width, event.height
+        if self._is_paused and self._current_frame_image and self.scaled:
+            if self._keep_aspect_ratio:
+                resized_image = ImageOps.contain(self._current_frame_image.copy(), self._current_display_size)
+            else:
+                resized_image = self._current_frame_image.copy().resize(self._current_display_size)
+            photo_image = self._create_photoimage(resized_image)
+            self._safe_config_image(photo_image)
+
+
+    def _set_frame_size(self, _event: Optional[Any] = None) -> None:
+        """Set frame size for display."""
         if not self.winfo_exists():
             return
-        self._video_info["framesize"] = (self._container.streams.video[0].width, self._container.streams.video[0].height)
-        img = Image.new("RGBA", self._video_info["framesize"], (255, 0, 0, 0))
-        self.current_imgtk = ImageTk.PhotoImage(img)
-        # Schedule UI update on main thread
-        self.after(0, lambda: self.config(width=150, height=100, image=self.current_imgtk))
+        self._video_info["framesize"] = (self._video_container.streams.video[0].width, self._video_container.streams.video[0].height)
+        blank_image = Image.new("RGBA", self._video_info["framesize"], (255, 0, 0, 0))
+        self._current_frame_image = blank_image
+        photo_image = self._create_photoimage(blank_image)
+        if photo_image is not None:
+            self._safe_config_image(photo_image)
+            def safe_configure():
+                if self.winfo_exists():
+                    try:
+                        self.config(width=150, height=100)
+                    except tk.TclError:
+                        pass
+            self.after(0, safe_configure)
 
 
-    def _load(self, path):
-        """ load's file from a thread """
+#endregion
+#region Display Frame
+
+
+    def _display_frame(self, _event: Optional[Any]) -> None:
+        """Update label with current frame image."""
+        try:
+            existing_photoimage = getattr(self, "_current_imgtk", None)
+            if existing_photoimage and existing_photoimage.width() == self._current_frame_image.width and existing_photoimage.height() == self._current_frame_image.height:
+                try:
+                    existing_photoimage.paste(self._current_frame_image)
+                    self._safe_config_image(existing_photoimage)
+                    return
+                except Exception:
+                    pass
+            photo_image = self._create_photoimage(self._current_frame_image)
+            self._safe_config_image(photo_image)
+        except AttributeError:
+            pass
+
+
+#endregion
+#region Load Thread
+
+
+    def _load(self, video_file_path: str) -> None:
+        """Load and decode video frames in a separate thread.
+        Handles seeking, frame display, and frame rate consistency.
+        """
         current_thread = threading.current_thread()
         try:
-            with av.open(path) as self._container:
-                self._container.streams.video[0].thread_type = "AUTO"
-                # Improved seeking configuration
-                self._container.fast_seek = False  # Disable fast seek for accuracy
-                self._container.discard_corrupt = True
-                stream = self._container.streams.video[0]
+            with av.open(video_file_path) as self._video_container:
+                self._video_container.streams.video[0].thread_type = "AUTO"
+                self._video_container.fast_seek = False
+                self._video_container.discard_corrupt = True
+                video_stream = self._video_container.streams.video[0]
                 try:
-                    self._video_info["framerate"] = int(stream.average_rate)
+                    self._video_info["framerate"] = int(video_stream.average_rate)
                 except TypeError:
                     raise TypeError("Not a video file")
                 try:
-                    self._video_info["duration"] = float(stream.duration * stream.time_base)
-                    self.event_generate("<<Duration>>")  # duration has been found
-                except (TypeError, tk.TclError):  # the video duration cannot be found, this can happen for mkv files
+                    self._video_info["duration"] = float(video_stream.duration * video_stream.time_base)
+                    self._safe_generate_event("<<Duration>>")
+                except (TypeError, tk.TclError):
                     pass
-                self._frame_number = 0
+                self._current_frame_number = 0
                 self._set_frame_size()
-                self.stream_base = stream.time_base
-                try:
-                    self.event_generate("<<Loaded>>") # generated when the video file is opened
-                except tk.TclError:
-                    pass
-                now = time.time_ns() // 1_000_000  # time in milliseconds
-                then = now
-                time_in_frame = (1/self._video_info["framerate"])*1000 # second it should play each frame
-                while self._load_thread == current_thread and not self._stop:
-                    if self._seek: # seek to specific second
-                        # More precise seeking with microsecond accuracy
-                        seek_time = int(self._seek_sec * 1000000)  # Convert to microseconds
-                        self._container.seek(seek_time, whence='time', backward=True, any_frame=False)
-                        # Decode frames until we reach the exact target
-                        target_pts = self._seek_sec / stream.time_base
-                        for frame in self._container.decode(video=0):
-                            if frame.pts >= target_pts:
-                                # Update current frame to the seeked position
-                                self._time_stamp = float(frame.pts * stream.time_base)
-                                self._frame_number = int(self._video_info["framerate"] * self._time_stamp)
-                                width = self._current_frame_size[0]
-                                height = self._current_frame_size[1]
-                                if self._keep_aspect_ratio:
-                                    im_ratio = frame.width / frame.height
-                                    dest_ratio = width / height
-                                    if im_ratio != dest_ratio:
-                                        if im_ratio > dest_ratio:
-                                            new_height = round(frame.height / frame.width * width)
-                                            height = new_height
-                                        else:
-                                            new_width = round(frame.width / frame.height * height)
-                                            width = new_width
-                                self._current_img = frame.to_image(width=width, height=height, interpolation="FAST_BILINEAR")
-                                try:
-                                    self.event_generate("<<FrameGenerated>>")
-                                except tk.TclError:
-                                    pass
-                                break
-                        self._seek = False
-                        self._seek_sec = 0
-                    if self._paused:
-                        time.sleep(0.0001) # to allow other threads to function better when its paused
+                self.stream_base = video_stream.time_base
+                self._safe_generate_event("<<Loaded>>")
+                current_time_ms = self._get_time_in_ms()
+                previous_time_ms = current_time_ms
+                time_per_frame_ms = (1 / self._video_info["framerate"]) * 1000
+                while self._video_load_thread == current_thread and not self._should_stop:
+                    if self._should_seek:
+                        seek_time_us = int(self._seek_seconds * 1000000)
+                        target_pts = self._seek_seconds / video_stream.time_base
+                        self._seek_and_decode_to_target_pts(seek_time_us, target_pts, video_stream)
+                        self._should_seek = False
+                        self._seek_seconds = 0
+                    if self._is_paused:
+                        time.sleep(0.0001)
                         continue
-                    now = time.time_ns() // 1_000_000  # time in milliseconds
-                    delta = now - then  # time difference between current frame and previous frame
-                    then = now
-                    # print("Frame: ", frame.time, frame.index, self._video_info["framerate"])
+                    current_time_ms = self._get_time_in_ms()
+                    delta_ms = current_time_ms - previous_time_ms
+                    previous_time_ms = current_time_ms
                     try:
-                        frame = next(self._container.decode(video=0))
-                        self._time_stamp = float(frame.pts * stream.time_base)
-                        width = self._current_frame_size[0]
-                        height = self._current_frame_size[1]
-                        if self._keep_aspect_ratio:
-                            im_ratio = frame.width / frame.height
-                            dest_ratio = width / height
-                            if im_ratio != dest_ratio:
-                                if im_ratio > dest_ratio:
-                                    new_height = round(frame.height / frame.width * width)
-                                    height = new_height
-                                else:
-                                    new_width = round(frame.width / frame.height * height)
-                                    width = new_width
-                        self._current_img = frame.to_image(width=width, height=height, interpolation="FAST_BILINEAR")
-                        self._frame_number += 1
-                        self.event_generate("<<FrameGenerated>>")
-                        if self._frame_number % self._video_info["framerate"] == 0:
-                            self.event_generate("<<SecondChanged>>")
-                        if self.consistant_frame_rate:
-                            time.sleep(max((time_in_frame - delta)/1000, 0))
+                        frame = next(self._video_container.decode(video=0))
+                        self._process_frame(frame)
+                        if self.consistent_frame_rate:
+                            time.sleep(max((time_per_frame_ms - delta_ms) / 1000, 0))
                     except (StopIteration, av.error.EOFError, tk.TclError):
                         break
-                self._container.close()
-            if self._container:
-                self._container.close()
-                self._container = None
+            self._close_container()
         finally:
             self._cleanup()
             gc.collect()
 
 
-    def _cleanup(self):
-        self._frame_number = 0
-        self._paused = True
-        self._stop = True
-        if self._load_thread:
-            self._load_thread = None
-        if self._container:
-            self._container.close()
-            self._container = None
+    def _seek_and_decode_to_target_pts(self, seek_time_us: int, target_pts: float, video_stream: Any) -> None:
+        """Seek and decode frames until reaching the target PTS."""
+        self._video_container.seek(seek_time_us, whence='time', backward=True, any_frame=False)
+        for frame in self._video_container.decode(video=0):
+            if frame.pts >= target_pts:
+                self._update_current_frame_data(frame)
+                self._safe_generate_event("<<FrameGenerated>>")
+                break
+
+
+    # --- Frame Processing ---
+    def _process_frame(self, frame: Any) -> None:
+        """Update frame, timestamp, frame number, and generate frame event."""
+        self._update_current_frame(frame)
+        if self._current_frame_number % self._video_info["framerate"] == 0:
+            self._safe_generate_event("<<SecondChanged>>")
+
+
+    def _update_current_frame(self, frame: Any) -> None:
+        """Update current frame image, timestamp, frame number, and generate frame event."""
+        self._update_current_frame_data(frame)
+        self._safe_generate_event("<<FrameGenerated>>")
+
+
+    def _update_current_frame_data(self, frame: Any) -> None:
+        """Update current frame image, timestamp, and frame number."""
+        self._current_timestamp = float(frame.pts * self._video_container.streams.video[0].time_base)
+        self._current_frame_number = int(self._video_info["framerate"] * self._current_timestamp)
+        width, height = self._get_resized_dimensions(frame, self._current_display_size)
+        self._current_frame_image = frame.to_image(width=width, height=height, interpolation="FAST_BILINEAR")
+
+
+    # --- Frame/Image Utilities ---
+    def _get_resized_dimensions(self, frame: Any, target_display_size: Tuple[int, int]) -> Tuple[int, int]:
+        """Calculate resized dimensions according to aspect ratio settings."""
+        width, height = target_display_size
+        if self._keep_aspect_ratio:
+            image_ratio = frame.width / frame.height
+            destination_ratio = width / height
+            if image_ratio != destination_ratio:
+                if image_ratio > destination_ratio:
+                    new_height = round(frame.height / frame.width * width)
+                    height = new_height
+                else:
+                    new_width = round(frame.width / frame.height * height)
+                    width = new_width
+        return width, height
+
+
+    def _create_photoimage(self, pil_image: Image.Image) -> Optional[ImageTk.PhotoImage]:
+        """Create an ImageTk.PhotoImage safely (returns None on widget destruction)."""
         try:
-            self.event_generate("<<Ended>>")
+            return ImageTk.PhotoImage(pil_image)
+        except tk.TclError:
+            return None
+
+
+    def _safe_config_image(self, photoimage: Optional[ImageTk.PhotoImage]) -> None:
+        """Apply a PhotoImage to the label on the main thread if possible."""
+        if photoimage is None:
+            return
+        try:
+            # Schedule UI update on main thread to avoid Tk issues from worker thread
+            def safe_configure():
+                if self.winfo_exists():
+                    try:
+                        self.config(image=photoimage)
+                    except tk.TclError:
+                        pass
+            self.after(0, safe_configure)
+            # keep a reference so it's not garbage collected
+            self._current_imgtk = photoimage
         except tk.TclError:
             pass
 
 
-    def load(self, path: str):
-        """ loads the file from the given path """
-        self.stop()
-        self.path = path
+    # --- Event Utilities ---
+    def _safe_generate_event(self, event_name: str) -> None:
+        """Generate a tkinter event safely (ignore TclError when widget destroyed)."""
+        try:
+            self.event_generate(event_name)
+        except tk.TclError:
+            pass
 
 
-    def stop(self):
-        """ stops reading the file """
-        self._paused = True
-        self._stop = True
-        self._cleanup()
+    # --- Container & Cleanup ---
+    def _close_container(self) -> None:
+        """Safely close the av container and clear the reference."""
+        if self._video_container:
+            try:
+                self._video_container.close()
+            except Exception:
+                pass
+            self._video_container = None
 
 
-    def pause(self):
-        """ pauses the video file """
-        self._paused = True
+    def _cleanup(self) -> None:
+        self._current_frame_number = 0
+        self._is_paused = True
+        self._should_stop = True
+        if self._video_load_thread:
+            self._video_load_thread = None
+        self._close_container()
+        self._safe_generate_event("<<Ended>>")
 
 
-    def play(self):
-        """ plays the video file """
-        self._paused = False
-        self._stop = False
-        if not self._load_thread:
-            self._load_thread = threading.Thread(target=self._load,  args=(self.path, ), daemon=True)
-            self._load_thread.start()
+    # --- Misc Utilities ---
+    def _get_time_in_ms(self) -> int:
+        """Return current time in milliseconds."""
+        return time.time_ns() // 1_000_000
 
 
-    def is_paused(self):
-        """ returns if the video is paused """
-        return self._paused
-
-
-    def video_info(self) -> Dict:
-        """ returns dict containing duration, frame_rate, file"""
-        return self._video_info
-
-
-    def metadata(self) -> Dict:
-        """ returns metadata if available """
-        if self._container:
-            return self._container.metadata
-        return {}
-
-
-    def current_frame_number(self) -> int:
-        """ return current frame number """
-        return self._frame_number
-
-
-    def current_duration(self) -> float:
-        """ returns current playing duration in sec """
-        return self._time_stamp
-
-
-    def current_img(self) -> Image:
-        """ returns current frame image """
-        return self._current_img
-
-
-    def _display_frame(self, event):
-        """ displays the frame on the label """
-        if self.current_imgtk.width() == self._current_img.width and self.current_imgtk.height() == self._current_img.height:
-            self.current_imgtk.paste(self._current_img)
-        else:
-            self.current_imgtk = ImageTk.PhotoImage(self._current_img)
-        self.config(image=self.current_imgtk)
-
-
-    def seek(self, sec: float, precise: bool = False):
-        """ seeks to specific time with optional precise frame-accurate seeking """
-        self._seek = True
-        self._seek_sec = sec
-        # If precise seeking and paused, force immediate update
-        if precise and self._paused:
-            # Wait a bit for seek to complete
-            time.sleep(0.01)
+#endregion
