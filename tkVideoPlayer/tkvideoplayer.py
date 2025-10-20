@@ -88,9 +88,13 @@ class TkinterVideo(tk.Label):
 
     def _set_frame_size(self, event=None):
         """ sets frame size to avoid unexpected resizing """
+        if not self.winfo_exists():
+            return
         self._video_info["framesize"] = (self._container.streams.video[0].width, self._container.streams.video[0].height)
-        self.current_imgtk = ImageTk.PhotoImage(Image.new("RGBA", self._video_info["framesize"], (255, 0, 0, 0)))
-        self.config(width=150, height=100, image=self.current_imgtk)
+        img = Image.new("RGBA", self._video_info["framesize"], (255, 0, 0, 0))
+        self.current_imgtk = ImageTk.PhotoImage(img)
+        # Schedule UI update on main thread
+        self.after(0, lambda: self.config(width=150, height=100, image=self.current_imgtk))
 
 
     def _load(self, path):
