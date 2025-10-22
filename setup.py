@@ -23,7 +23,7 @@ setup(
     ],
     keywords=['tkinter', 'video', 'player', 'video player', 'tkvideoplayer', 'play video in tkinter'],
     packages=["tkVideoPlayer"],
-    install_requires=["av==11.0.0", "pillow>=11.0.0"],
+    install_requires=["av==16.0.0", "pillow>=11.0.0"],
     include_package_data=True,
     python_requires='>=3.6',
 )
