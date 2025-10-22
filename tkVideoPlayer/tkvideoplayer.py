@@ -99,8 +99,10 @@ class TkinterVideo(tk.Label):
         self._is_paused = True
 
 
-    def stop(self, *args: Any, **kwargs: Any) -> None:
+    def stop(self, _event: Optional[Any] = None) -> None:
         """Stop video playback and cleanup."""
+        # _event is provided when called via tkinter bindings; explicitly ignore it
+        del _event
         self._is_paused = True
         self._should_stop = True
         self._cleanup()
@@ -201,6 +203,8 @@ class TkinterVideo(tk.Label):
 
     def _set_frame_size(self, _event: Optional[Any] = None) -> None:
         """Set frame size for display."""
+        # _event comes from resize / other tkinter callbacks — not used here
+        del _event
         if not self.winfo_exists():
             return
         intrinsic_size = (
@@ -231,6 +235,8 @@ class TkinterVideo(tk.Label):
 
     def _display_frame(self, _event: Optional[Any]) -> None:
         """Update label with current frame image."""
+        # _event is not used; it's provided when called via event_generate/bind
+        del _event
         try:
             existing_photoimage = getattr(self, "_current_imgtk", None)
             if existing_photoimage and existing_photoimage.width() == self._current_frame_image.width and existing_photoimage.height() == self._current_frame_image.height:
@@ -258,8 +264,6 @@ class TkinterVideo(tk.Label):
         try:
             with av.open(video_file_path) as self._video_container:
                 self._video_container.streams.video[0].thread_type = "AUTO"
-                self._video_container.fast_seek = False
-                self._video_container.discard_corrupt = True
                 video_stream = self._video_container.streams.video[0]
                 try:
                     self._video_info["framerate"] = int(video_stream.average_rate)
@@ -281,7 +285,8 @@ class TkinterVideo(tk.Label):
                     if self._should_seek:
                         seek_time_us = int(self._seek_seconds * 1000000)
                         target_pts = self._seek_seconds / video_stream.time_base
-                        self._seek_and_decode_to_target_pts(seek_time_us, target_pts, video_stream)
+                        # video_stream no longer needed by the helper; call without it
+                        self._seek_and_decode_to_target_pts(seek_time_us, target_pts)
                         self._should_seek = False
                         self._seek_seconds = 0
                     if self._is_paused:
@@ -303,9 +308,14 @@ class TkinterVideo(tk.Label):
             gc.collect()
 
 
-    def _seek_and_decode_to_target_pts(self, seek_time_us: int, target_pts: float, video_stream: Any) -> None:
+    def _seek_and_decode_to_target_pts(self, seek_time_us: int, target_pts: float) -> None:
         """Seek and decode frames until reaching the target PTS."""
-        self._video_container.seek(seek_time_us, whence='time', backward=True, any_frame=False)
+        try:
+            self._video_container.seek(seek_time_us, any_frame=False, backward=True)
+        except Exception:
+            # Seek failed for this version — give up silently
+            return
+
         for frame in self._video_container.decode(video=0):
             if frame.pts >= target_pts:
                 self._update_current_frame_data(frame)
