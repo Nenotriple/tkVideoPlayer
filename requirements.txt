@@ -1,2 +1,4 @@
+--only-binary=av
 av==11.0.0
+
 pillow~=11.0.0
