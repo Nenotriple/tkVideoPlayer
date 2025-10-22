@@ -1,5 +1,2 @@
---only-binary=av
---find-links https://www.gyan.dev/ffmpeg/builds/python/
-av==11.0.0
-
+av==16.0.0
 pillow~=11.0.0
